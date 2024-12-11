@@ -10,147 +10,160 @@ from datetime import datetime
 import csv
 import re
 
-# Inicializa el navegador de Selenium
+# Start Selenium WebDriver
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
 
-# Carga la página
-url = 'https://www.behance.net/joblist?tracking_source=nav20' #Link to the Behance job list
+# Load the Behance job list
+url = 'https://www.behance.net/joblist?tracking_source=nav20'  # Link to the Behance job list
 driver.get(url)
 
-# Configuración de la cantidad de ofertas a revisar y días recientes para filtrar
-dias_recientes = 30
-numero_deseado = 600  # Total de ofertas a revisar en la web
-enlaces_revisados = []  # Todos los enlaces revisados, sin importar el filtro de días
-enlaces_encontrados = []  # Enlaces que cumplen con el filtro de 30 días
-ofertas_guardadas = []
-ciclos_sin_nuevos_enlaces = 0  # Contador para detectar cuando ya no cargan nuevas ofertas
+# Configuration of the number of jobs to review and recent days to filter
+recent_days = 30
+desired_number = 600  # Total jobs to review on the website
+reviewed_links = []  # All reviewed links, regardless of the days filter
+found_links = []  # Links that meet the day filter
+saved_jobs = []
+cycles_without_new_links = 0  # Counter to detect when no new jobs are loading
+
+# Keyword to search in the job description
+keyword = "" # Add the keyword you want to search in the job description  
+
 
 try:
-    # Espera hasta 20 segundos para que aparezca el primer enlace de oferta
+    # Wait up to 20 seconds for the first job link to appear
     WebDriverWait(driver, 20).until(
         EC.presence_of_element_located((By.CLASS_NAME, "JobCard-jobCardLink-Ywm"))
     )
 
-    # Bucle de desplazamiento para capturar hasta numero_deseado de ofertas
-    while len(enlaces_revisados) < numero_deseado and ciclos_sin_nuevos_enlaces < 5:
-        # Ejecuta el desplazamiento hacia abajo y espera para cargar contenido nuevo
+    # Scrolling loop to capture up to the desired number of jobs
+    while len(reviewed_links) < desired_number and cycles_without_new_links < 5:
+        # Execute scroll down and wait to load new content
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        sleep(5)  # Aumenta el tiempo para asegurar carga de nuevos elementos
+        sleep(5)  # Increase the time to ensure new elements load
 
-        # Obtiene el HTML de la página actual
+        # Get the HTML of the current page
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
 
-        # Guarda la cantidad de enlaces revisados antes de esta página
-        enlaces_previos = len(enlaces_revisados)
+        # Save the number of links reviewed before this page
+        previous_links = len(reviewed_links)
 
-        # Procesa cada oferta y extrae el enlace
+        # Process each job and extract the link
         for job_card in soup.find_all('a', class_='JobCard-jobCardLink-Ywm'):
             link = job_card['href']
             full_url = f"https://www.behance.net{link}"
             
-            # Verifica si ya hemos revisado este enlace
-            if full_url not in enlaces_revisados:
-                enlaces_revisados.append(full_url)  # Agrega a la lista de revisados
+            # Check if we have already reviewed this link
+            if full_url not in reviewed_links:
+                reviewed_links.append(full_url)  # Add to the reviewed list
 
-                # Ahora revisa si cumple con `dias_recientes`
+                # Now check if it meets the `recent_days` filter
                 aria_label = job_card.get('aria-label', '')
-                dias_publicado = None
-                if "hace" in aria_label:
-                    if re.search(r'(\d+)\s*d[ií]as?', aria_label):  # Coincide con "hace X días"
-                        dias_publicado = int(re.search(r'(\d+)\s*d[ií]as?', aria_label).group(1))
-                    elif re.search(r'un\s*mes', aria_label):  # Coincide con "hace un mes"
-                        dias_publicado = 30
-                    elif re.search(r'(\d+)\s*meses?', aria_label):  # Coincide con "hace X meses"
-                        dias_publicado = int(re.search(r'(\d+)\s*meses?', aria_label).group(1)) * 30
-                    elif re.search(r'(\d+)\s*horas?', aria_label):  # Coincide con "hace X horas"
-                        dias_publicado = 0  # Publicado hoy mismo si es en horas
+                days_published = None
 
-                # Verifica en `JobCard-time-Cvz` si `aria-label` no es suficiente
-                if dias_publicado is None:
-                    tiempo_elemento = job_card.find_next('span', class_='JobCard-time-Cvz')
-                    if tiempo_elemento:
-                        tiempo_texto = tiempo_elemento.text.strip()
-                        if re.search(r'(\d+)\s*d[ií]as?', tiempo_texto):
-                            dias_publicado = int(re.search(r'(\d+)\s*d[ií]as?', tiempo_texto).group(1))
-                        elif re.search(r'un\s*mes', tiempo_texto):
-                            dias_publicado = 30
-                        elif re.search(r'(\d+)\s*meses?', tiempo_texto):
-                            dias_publicado = int(re.search(r'(\d+)\s*meses?', tiempo_texto).group(1)) * 30
-                        elif re.search(r'(\d+)\s*horas?', tiempo_texto):
-                            dias_publicado = 0
+                '''Make sure the website is in English to match the text patterns, if not, you should chamge the patterns'''
 
-                # Agrega a `enlaces_encontrados` solo si cumple con el filtro de días
-                if dias_publicado is not None and dias_publicado <= dias_recientes:
-                    enlaces_encontrados.append(full_url)
+                if "ago" in aria_label:
+                    if re.search(r'(\d+)\s*days?', aria_label):  # Matches "X days ago"
+                        days_published = int(re.search(r'(\d+)\s*days?', aria_label).group(1))
+                    elif re.search(r'one\s*month', aria_label):  # Matches "one month ago"
+                        days_published = 30
+                    elif re.search(r'(\d+)\s*months?', aria_label):  # Matches "X months ago"
+                        days_published = int(re.search(r'(\d+)\s*months?', aria_label).group(1)) * 30
+                    elif re.search(r'(\d+)\s*hours?', aria_label):  # Matches "X hours ago"
+                        days_published = 0  # Published today if the time is in hours
 
-        # Verifica si se encontraron nuevos enlaces en este ciclo
-        if len(enlaces_revisados) == enlaces_previos:
-            ciclos_sin_nuevos_enlaces += 1  # Incrementa si no hubo nuevos enlaces
+                # If the previous method didn't work, try to find the time in the job page
+                if days_published is None:
+                    time_element = job_card.find_next('span', class_='JobCard-time-Cvz')
+                    if time_element:
+                        time_text = time_element.text.strip()
+                        if re.search(r'(\d+)\s*days?', time_text):
+                            days_published = int(re.search(r'(\d+)\s*days?', time_text).group(1))
+                        elif re.search(r'one\s*month', time_text):
+                            days_published = 30
+                        elif re.search(r'(\d+)\s*months?', time_text):
+                            days_published = int(re.search(r'(\d+)\s*months?', time_text).group(1)) * 30
+                        elif re.search(r'(\d+)\s*hours?', time_text):
+                            days_published = 0
+
+                # Add to `found_links` only if it meets the days filter
+                if days_published is not None and days_published <= recent_days:
+                    found_links.append(full_url)
+
+        # Check if new links were found in this cycle
+        if len(reviewed_links) == previous_links:
+            cycles_without_new_links += 1  # Increment if no new links were found
         else:
-            ciclos_sin_nuevos_enlaces = 0  # Restablece si hubo nuevos enlaces
+            cycles_without_new_links = 0  # Reset if new links were found
 
-    # Muestra el total de enlaces revisados y los enlaces recientes encontrados
-    print(f"Total de enlaces revisados: {len(enlaces_revisados)}")
-    print(f"Total de enlaces recientes encontrados (menos de {dias_recientes} días): {len(enlaces_encontrados)}")
+    # Display the total number of reviewed links and recent links found
+    print(f"Total reviewed links: {len(reviewed_links)}")
+    print(f"Total recent links found (less than {recent_days} days): {len(found_links)}")
 
-    # Accede a cada enlace reciente y verifica la palabra clave "Blender"
-    for full_url in enlaces_encontrados:
+    # Access each recent link and check for the keyword 
+   
+    for full_url in found_links:
         driver.get(full_url)
-        sleep(2)  # Espera a que cargue la página de la oferta
+        sleep(2)  # Wait for the job page to load
 
-        # Extrae el HTML de la oferta y analiza el contenido
+        # Extract the HTML of the job page and analyze the content
         job_html = driver.page_source
         job_soup = BeautifulSoup(job_html, 'html.parser')
 
-        # Verifica la palabra clave en la descripción de la oferta
-        if "Blender" in job_soup.text:
-            print(f"Oferta cumple la condición: {full_url}")
+        # Check for the keyword in the job description
+        if keyword in job_soup.text:
+            print(f"Job meets the condition: {full_url}")
 
-            # Extrae el link y el nombre de la empresa
-            link_empresa_guardado = None
-            nombre_empresa = None
-            link_empresa = job_soup.find('a', class_='JobDetailContent-companyNameLink-EUx')
-            if link_empresa:
-                link_empresa_guardado = link_empresa["href"]
-                nombre_empresa = link_empresa.text.strip()
-                # Elimina el texto extra "se abre en una pestaña nueva" si está presente
-                nombre_empresa = nombre_empresa.replace("se abre en una pestaña nueva", "").strip()
+            # Extract the link and the company name
+            saved_company_link = None
+            company_name = None
+            company_link = job_soup.find('a', class_='JobDetailContent-companyNameLink-EUx')
+            if company_link:
+                saved_company_link = company_link["href"]
+                company_name = company_link.text.strip()
+                # Remove the extra text "opens in a new tab" if present
+                company_name = company_name.replace("opens in a new tab", "").strip()
 
-            # Guarda los datos en la lista de ofertas
-            ofertas_guardadas.append({
-                'link_oferta': full_url,
-                'link_empresa': link_empresa_guardado,
-                'nombre_empresa': nombre_empresa
+            # Save the data to the job list
+            saved_jobs.append({
+                'job_link': full_url,
+                'company_link': saved_company_link,
+                'company_name': company_name
             })
 
-    print(f'Lista de ofertas guardadas: {ofertas_guardadas}')
+    print(f'Saved job list: {saved_jobs}')
 
 finally:
-    # Cierra el navegador al final
+    # Close the browser at the end
     driver.quit()
 
-# Guardado en CSV
-csv_filename = 'behance_jobs.csv'  #Add your local path to save the CSV file
-enlaces_existentes = set()
+# Save to CSV
+csv_filename = 'behance_jobs.csv'  # Add your local path to save the CSV file
+existing_links = set()
 
+# Ensure the CSV file exists
 try:
     with open(csv_filename, mode='r', encoding='utf-8-sig') as file:
         reader = csv.DictReader(file, delimiter=',')
         for row in reader:
-            enlaces_existentes.add(row['link_oferta'])
+            existing_links.add(row['job_link'])
 except FileNotFoundError:
-    print('Documento no encontrado')
-    pass
+    print('File not found. Creating a new file.')
+    # Create the file with headers if it doesn't exist
+    with open(csv_filename, mode='w', newline='', encoding='utf-8-sig') as file:
+        fieldnames = ['job_link', 'company_name', 'company_link', 'stored_date']
+        writer = csv.DictWriter(file, fieldnames=fieldnames, delimiter=',')
+        writer.writeheader()  # Write header to the new file
 
+# Append new data to the file
 with open(csv_filename, mode='a', newline='', encoding='utf-8-sig') as file:
-    fieldnames = ['link_oferta', 'nombre_empresa', 'link_empresa', 'fecha_almacenada']
+    fieldnames = ['job_link', 'company_name', 'company_link', 'stored_date']
     writer = csv.DictWriter(file, fieldnames=fieldnames, delimiter=',')
     if file.tell() == 0:
-        writer.writeheader()
+        writer.writeheader()  # Write header if file was empty
 
-    for oferta in ofertas_guardadas:
-        if oferta['link_oferta'] not in enlaces_existentes:
-            oferta['fecha_almacenada'] = datetime.now().strftime('%Y-%m-%d')
-            writer.writerow(oferta)
-
+    for job in saved_jobs:
+        if job['job_link'] not in existing_links:
+            job['stored_date'] = datetime.now().strftime('%Y-%m-%d')
+            writer.writerow(job)
